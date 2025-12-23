@@ -40,6 +40,7 @@ CORE_SPIDER_TERMS = [
     "shelob",
     "ungoliant",
     "Aragog",
+    'aragog'
 ]
 
 # Only count if CORE terms exist (prevents “web” false positives)

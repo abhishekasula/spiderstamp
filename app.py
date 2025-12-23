@@ -3,59 +3,55 @@ from movie_resolve import resolve_movie
 from spider_report import build_report
 
 st.set_page_config(page_title="SpiderStamp (Melina)", page_icon="🕷️")
+
 @st.cache_data(ttl=86400)
 def cached_report(title: str, year: str | None):
     movie = resolve_movie(title, year)
     return build_report(movie)
 
-# --- Cute helper: verdict + messages ---
-def verdict_block(confidence: str, score: int):
-    confidence = (confidence or "").lower()
+def verdict_block(confidence: str, severity: str, score: int):
+    conf = (confidence or "").lower()
+    sev = (severity or "").lower()
 
-    # You can tweak these thresholds any time
-    if confidence == "low":
+    if sev.startswith("deceased-only"):
+        st.success("🟢 **Likely safe, Melina** ✨")
+        st.caption("Spider is mentioned/seen only as deceased (non-moving, non-threatening).")
+        st.progress(10, text="Spider energy: very low 🫧")
+        return
+
+    if conf == "low":
         st.success("🟢 **Looks spider-safe, Melina** ✨")
-        st.caption("No strong spider signals found in our checks. (Still not a 100% guarantee — but vibes are good.)")
+        st.caption("No strong spider signals found in our checks. (Not a perfect guarantee, but vibes are good.)")
         st.progress(10, text="Spider energy: low 🫧")
-
         st.balloons()
-        st.markdown("#### 🍿 Cozy mode activated")
-        st.write("Go enjoy your movie, queen. If a spider even *thinks* about showing up, we’ll be offended on your behalf.")
+        return
 
-    elif confidence == "medium":
-        st.warning("🟡 **Proceed with caution, Melina** 👀")
-        st.caption("Some spider-ish evidence showed up. Not necessarily intense — but stay alert.")
+    if conf == "medium":
+        msg = "🟡 **Proceed with caution, Melina** 👀"
+        if "eye-closeups" in sev:
+            msg += "  (eye-focused imagery flagged)"
+        st.warning(msg)
+        st.caption("Some spider evidence showed up. Might be mild, but stay alert.")
         st.progress(55, text="Spider energy: medium ⚠️")
+        return
 
-        st.markdown("#### 🧸 Gentle heads-up")
-        st.write("You’re probably fine… but keep your finger ready on the pause button like it owes you money.")
+    msg = "🔴 **Spider-heavy likely, Melina** 🚫🕷️"
+    if "eye-closeups" in sev:
+        msg += "  (eye-focused imagery flagged)"
+    st.error(msg)
+    st.caption("Multiple sources suggest spiders. Consider skipping or watching with a safety plan.")
+    st.progress(90, text="Spider energy: high 🚨")
 
-    else:  # high
-        st.error("🔴 **Spider-heavy likely, Melina** 🚫🕷️")
-        st.caption("Multiple sources strongly suggest spiders. Consider skipping or watching with a safety plan.")
-        st.progress(90, text="Spider energy: high 🚨")
-
-        st.markdown("#### 🛡️ Safety plan")
-        st.write("Okay bestie: lights on, volume down, and be ready to fast-forward like a pro gamer.")
-
-# --- Header ---
 st.title("🕷️ SpiderStamp")
 st.markdown("### Hi Melina 👋")
 st.write("What movie are you watching today? 🎬")
 
-# --- Inputs ---
 movie_title = st.text_input("", placeholder="Type a movie title…")
-year = st.text_input("Year (optional)", placeholder="e.g., 2000")
+year = st.text_input("Year (optional)", placeholder="e.g., 2009")
 
-col1, col2 = st.columns([1, 1])
-with col1:
-    check = st.button("Check for spiders", type="primary")
-with col2:
-    st.caption("Tip: add the year for remakes.")
-
+check = st.button("Check for spiders", type="primary")
 st.divider()
 
-# --- Run report ---
 if check:
     if not movie_title.strip():
         st.warning("Type a movie title first 🙂")
@@ -64,19 +60,18 @@ if check:
     try:
         with st.spinner("Checking the web for spider vibes..."):
             report = cached_report(movie_title.strip(), year.strip() or None)
-            movie = report["movie"]
 
+        movie = report["movie"]
         st.subheader(f"{movie['title']} ({movie['year']})")
         st.write(f"**🕷️ Spider likelihood:** `{report['confidence']}`  (score={report['score']})")
+        st.write(f"**Severity:** `{report['severity']}`")
         st.caption(f"IMDb ID: {movie['imdb_id']}")
 
-        # ✅ Cute verdict + messages
-        verdict_block(report["confidence"], report["score"])
+        verdict_block(report["confidence"], report["severity"], report["score"])
 
         st.divider()
 
-        # --- Evidence ---
-        imdb_ev = report["evidence"][0]
+        # Evidence (IMDb + Wikipedia)
         st.markdown("### 🧾 Evidence (for the receipts)")
         for ev in report["evidence"]:
             st.markdown(f"**{ev['source']}**")
@@ -84,11 +79,16 @@ if check:
                 st.write(ev["url"])
             st.write(f"- Available: **{ev.get('ok')}**")
             st.write(f"- Core hits: **{', '.join(ev.get('core_hits', [])) or 'None'}**")
+            if ev.get("deceased"):
+                st.info("🪦 Deceased/non-threatening context detected.")
+            if ev.get("eye_context") and not ev.get("deceased"):
+                st.warning("👀 Eye-focused spider imagery detected.")
             if ev.get("snippets"):
                 for sn in ev["snippets"]:
                     st.info(sn)
             st.divider()
 
+        # Web evidence pages
         st.markdown("### 🌐 Web evidence (pages we checked)")
         if not report["web_evidence"]:
             st.write("No fetched pages contained core spider mentions.")
@@ -96,12 +96,14 @@ if check:
             for e in report["web_evidence"][:8]:
                 st.markdown(f"**{e.get('title','(page)')}**")
                 st.write(e["url"])
-                st.write(f"Core hits: {', '.join(e['core_hits'])}")
-                for sn in e["snippets"]:
+                st.write(f"- Core hits: {', '.join(e['core_hits'])}")
+                if e.get("deceased"):
+                    st.info("🪦 Deceased/non-threatening context detected on this page.")
+                if e.get("eye_context") and not e.get("deceased"):
+                    st.warning("👀 Eye-focused spider imagery detected on this page.")
+                for sn in e.get("snippets", []):
                     st.info(sn)
                 st.divider()
-
-
 
         st.success("✅ Done! Want to check another movie, Melina?")
 

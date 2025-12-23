@@ -470,7 +470,7 @@ def build_report(movie: dict) -> dict:
 
     present = spider_present(imdb_ev, wiki_ev, web_evs, movie["imdb_id"])
 
-    confidence, score = score_confidence(imdb_ev, wiki_ev, web_evs)s
+    confidence, score = score_confidence(imdb_ev, wiki_ev, web_evs)
 
     # Optional severity label (for info only)
     all_evs = [imdb_ev, wiki_ev] + web_evs

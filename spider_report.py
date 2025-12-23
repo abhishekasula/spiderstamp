@@ -5,7 +5,6 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
 # --- CORE vs SUPPORT TERMS ---
-# CORE terms must be present to consider a page "spider evidence".
 CORE_SPIDER_TERMS = [
     "spider", "spiders",
     "tarantula", "tarantulas",
@@ -13,13 +12,12 @@ CORE_SPIDER_TERMS = [
     "acromantula", "acromantulas",
 ]
 
-# These only count if CORE terms are present (prevents "web" false positives).
+# Only count if CORE terms exist (prevents “web” false positives)
 SUPPORT_TERMS = [
     "cobweb", "cobwebs",
     "webs", "webbed", "webbing",
 ]
 
-# Intensity hints (pure heuristic)
 SEVERITY_TERMS = {
     "close-up": 3,
     "close up": 3,
@@ -38,20 +36,16 @@ SEVERITY_TERMS = {
     "webs everywhere": 3,
 }
 
-# Avoid Spider-Man confusion
-NEGATIVE_CONTEXT = [
-    "spider-man", "spiderman"
-]
+NEGATIVE_CONTEXT = ["spider-man", "spiderman"]
 
-# Prefer these domains if they show up in results
 PREFERRED_DOMAINS = {
     "imdb.com": 5,
-    "wikipedia.org": 3,
+    "wikipedia.org": 4,
     "commonsensemedia.org": 3,
     "doesthedogdie.com": 3,
 }
 
-USER_AGENT = "Mozilla/5.0 (compatible; SpiderStamp/0.3)"
+USER_AGENT = "Mozilla/5.0 (compatible; SpiderStamp/0.4)"
 
 
 def clean_text(html: str) -> str:
@@ -62,16 +56,7 @@ def clean_text(html: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-def has_negative_context(text: str) -> bool:
-    t = text.lower()
-    return any(bad in t for bad in NEGATIVE_CONTEXT)
-
-
 def extract_hits(text: str) -> tuple[list[str], list[str]]:
-    """
-    Returns (core_hits, support_hits).
-    support_hits is only kept if core_hits exists.
-    """
     t = text.lower()
     core_hits = sorted({w for w in CORE_SPIDER_TERMS if w in t})
     support_hits = sorted({w for w in SUPPORT_TERMS if w in t})
@@ -123,10 +108,6 @@ def fetch(url: str) -> str | None:
 
 
 def duckduckgo_results(query: str, max_results: int = 8) -> list[dict]:
-    """
-    Best-effort DuckDuckGo HTML search.
-    Returns list of {title, url, snippet}.
-    """
     url = "https://duckduckgo.com/html/"
     try:
         r = requests.post(
@@ -158,70 +139,87 @@ def imdb_parental_guide_evidence(imdb_id: str) -> dict:
     url = f"https://www.imdb.com/title/{imdb_id}/parentalguide/"
     html = fetch(url)
     if not html:
-        return {
-            "source": "imdb_parentalguide",
-            "url": url,
-            "ok": False,
-            "core_hits": [],
-            "support_hits": [],
-            "snippets": [],
-            "severity": 0,
-        }
+        return {"source": "imdb_parentalguide", "url": url, "ok": False,
+                "core_hits": [], "support_hits": [], "snippets": [], "severity": 0}
 
     text = clean_text(html)
     core, support = extract_hits(text)
 
-    # If no core hits, treat as no spider evidence (prevents web-only false positives)
+    # No CORE = treat as no spider evidence
     if not core:
-        return {
-            "source": "imdb_parentalguide",
-            "url": url,
-            "ok": True,
-            "core_hits": [],
-            "support_hits": [],
-            "snippets": [],
-            "severity": 0,
-        }
+        return {"source": "imdb_parentalguide", "url": url, "ok": True,
+                "core_hits": [], "support_hits": [], "snippets": [], "severity": 0}
 
     hits_for_snips = core + support
     snips = extract_context_snippets(text, hits_for_snips)
     sev = severity_score(" ".join(snips)) if snips else 0
 
-    return {
-        "source": "imdb_parentalguide",
-        "url": url,
-        "ok": True,
-        "core_hits": core,
-        "support_hits": support,
-        "snippets": snips,
-        "severity": sev,
-    }
+    return {"source": "imdb_parentalguide", "url": url, "ok": True,
+            "core_hits": core, "support_hits": support, "snippets": snips, "severity": sev}
 
 
-def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int = 10) -> list[dict]:
+def wikipedia_evidence(movie_title: str, movie_year: str) -> dict:
     """
-    Multi-query search -> pick URLs -> fetch pages -> extract spider evidence.
-    ONLY accepts pages with CORE spider terms.
+    Wikipedia summary via REST API (no key). Much more stable than scraping.
     """
-    title = movie_title
-    year = movie_year
+    candidates = [
+        f"{movie_title} (film)",
+        f"{movie_title} ({movie_year} film)",
+        movie_title,
+    ]
 
+    for cand in candidates:
+        slug = cand.replace(" ", "_")
+        api_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{slug}"
+
+        try:
+            r = requests.get(api_url, headers={"User-Agent": USER_AGENT}, timeout=20)
+            if r.status_code != 200:
+                continue
+            data = r.json()
+        except Exception:
+            continue
+
+        extract = (data.get("extract") or "").strip()
+        page_url = (data.get("content_urls", {}) or {}).get("desktop", {}).get("page", "")
+
+        if not extract:
+            continue
+
+        core, support = extract_hits(extract)
+        if not core:
+            return {"source": "wikipedia", "url": page_url, "ok": True,
+                    "core_hits": [], "support_hits": [], "snippets": [], "severity": 0}
+
+        hits_for_snips = core + support
+        snips = extract_context_snippets(extract, hits_for_snips, window=200, max_snips=3)
+        sev = severity_score(" ".join(snips)) + 2  # small trust bonus
+
+        return {"source": "wikipedia", "url": page_url, "ok": True,
+                "core_hits": core, "support_hits": support, "snippets": snips, "severity": sev}
+
+    return {"source": "wikipedia", "url": "", "ok": False,
+            "core_hits": [], "support_hits": [], "snippets": [], "severity": 0}
+
+
+def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int = 12) -> list[dict]:
+    """
+    Multi-query search -> fetch pages -> accept only CORE spider pages.
+    """
     queries = [
-        f"\"{title}\" {year} spider scene",
-        f"\"{title}\" {year} tarantula scene",
-        f"\"{title}\" {year} arachnid scene",
-        f"\"{title}\" {year} acromantula scene",
-        f"\"{title}\" {year} parental guide spider",
-        f"\"{title}\" {year} does the dog die spider",
-        f"\"{title}\" {year} imdb parental guide spider",
+        f"\"{movie_title}\" {movie_year} spider scene",
+        f"\"{movie_title}\" {movie_year} tarantula scene",
+        f"\"{movie_title}\" {movie_year} arachnid scene",
+        f"\"{movie_title}\" {movie_year} parental guide spider",
+        f"\"{movie_title}\" {movie_year} does the dog die spider",
+        f"\"{movie_title}\" {movie_year} imdb parental guide spider",
     ]
 
     raw_results = []
     for q in queries:
         raw_results.extend(duckduckgo_results(q, max_results=6))
-        time.sleep(0.2)  # small politeness delay
+        time.sleep(0.2)
 
-    # Deduplicate URLs
     seen = set()
     results = []
     for r in raw_results:
@@ -231,7 +229,6 @@ def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int 
         seen.add(u)
         results.append(r)
 
-    # Rank: prefer known domains + core terms in snippet/title; penalize Spider-Man
     def rank(item: dict) -> tuple:
         text = (item.get("title", "") + " " + item.get("snippet", "")).lower()
         core_bonus = 1 if any(t in text for t in CORE_SPIDER_TERMS) else 0
@@ -250,7 +247,7 @@ def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int 
         text = clean_text(html)
         core, support = extract_hits(text)
 
-        # 🚨 Key change: skip pages unless CORE terms exist
+        # key: require CORE terms
         if not core:
             continue
 
@@ -266,36 +263,29 @@ def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int 
             "support_hits": support,
             "snippets": snips,
             "severity": sev,
-            "negative_context": has_negative_context(text),
         })
 
     return evidences
 
 
-def score_confidence(imdb_ev: dict, web_evs: list[dict]) -> tuple[str, int]:
-    """
-    Score based on:
-    - IMDb parental guide CORE hit (strong)
-    - multiple independent pages with CORE hits
-    - severity language
-    """
+def score_confidence(imdb_ev: dict, wiki_ev: dict, web_evs: list[dict]) -> tuple[str, int]:
     score = 0
 
-    # Strong signal: IMDb has core spider terms
+    # Strong signals
     if imdb_ev.get("ok") and imdb_ev.get("core_hits"):
         score += 7
         score += min(3, imdb_ev.get("severity", 0) // 2)
 
-    # Independent evidence count (core-only by construction)
+    if wiki_ev.get("ok") and wiki_ev.get("core_hits"):
+        score += 4
+        score += min(2, wiki_ev.get("severity", 0) // 2)
+
+    # Independent web pages with core hits
     score += min(6, len(web_evs))
 
     # Severity language boosts
     sev_sum = sum(e.get("severity", 0) for e in web_evs)
     score += min(6, sev_sum // 3)
-
-    # Penalize Spider-Man confusion a bit
-    if any(e.get("negative_context") for e in web_evs):
-        score -= 2
 
     if score >= 12:
         return ("high", score)
@@ -306,12 +296,12 @@ def score_confidence(imdb_ev: dict, web_evs: list[dict]) -> tuple[str, int]:
 
 def build_report(movie: dict) -> dict:
     imdb_ev = imdb_parental_guide_evidence(movie["imdb_id"])
+    wiki_ev = wikipedia_evidence(movie["title"], movie["year"])
     web_evs = search_and_fetch_evidence(movie["title"], movie["year"], max_pages=12)
 
-    confidence, score = score_confidence(imdb_ev, web_evs)
+    confidence, score = score_confidence(imdb_ev, wiki_ev, web_evs)
 
-    # Simple severity label
-    sev_total = imdb_ev.get("severity", 0) + sum(e.get("severity", 0) for e in web_evs)
+    sev_total = imdb_ev.get("severity", 0) + wiki_ev.get("severity", 0) + sum(e.get("severity", 0) for e in web_evs)
     if confidence == "high" and sev_total >= 10:
         severity_label = "spider-heavy"
     elif confidence in ("medium", "high"):
@@ -324,6 +314,6 @@ def build_report(movie: dict) -> dict:
         "confidence": confidence,
         "score": score,
         "severity": severity_label,
-        "evidence": [imdb_ev],
+        "evidence": [imdb_ev, wiki_ev],
         "web_evidence": web_evs,
     }

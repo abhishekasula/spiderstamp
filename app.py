@@ -78,25 +78,29 @@ if check:
         # --- Evidence ---
         imdb_ev = report["evidence"][0]
         st.markdown("### 🧾 Evidence (for the receipts)")
-        st.write(f"- IMDb parental guide available: **{imdb_ev['ok']}**")
-        st.write(f"- Spider-ish terms found: **{', '.join(imdb_ev['hits']) if imdb_ev['hits'] else 'None found'}**")
-        st.write(f"- Link: {imdb_ev['url']}")
-        st.write(f"**Severity:** `{report['severity']}`")
-
-        if imdb_ev["snippet"]:
-            st.info(imdb_ev["snippet"])
+        for ev in report["evidence"]:
+            st.markdown(f"**{ev['source']}**")
+            if ev.get("url"):
+                st.write(ev["url"])
+            st.write(f"- Available: **{ev.get('ok')}**")
+            st.write(f"- Core hits: **{', '.join(ev.get('core_hits', [])) or 'None'}**")
+            if ev.get("snippets"):
+                for sn in ev["snippets"]:
+                    st.info(sn)
+            st.divider()
 
         st.markdown("### 🌐 Web evidence (pages we checked)")
         if not report["web_evidence"]:
-            st.write("No spider hits found on fetched pages.")
+            st.write("No fetched pages contained core spider mentions.")
         else:
             for e in report["web_evidence"][:8]:
                 st.markdown(f"**{e.get('title','(page)')}**")
-                st.write(f"- URL: {e['url']}")
-                st.write(f"- Terms: {', '.join(e['hits'])}")
+                st.write(e["url"])
+                st.write(f"Core hits: {', '.join(e['core_hits'])}")
                 for sn in e["snippets"]:
                     st.info(sn)
                 st.divider()
+
 
 
         st.success("✅ Done! Want to check another movie, Melina?")

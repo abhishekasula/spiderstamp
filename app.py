@@ -5,7 +5,7 @@ from spider_report import build_report
 st.set_page_config(page_title="SpiderStamp (Melina)", page_icon="🕷️")
 
 # --- Header ---
-st.title("🕷️ SpiderStamp")
+st.title("SpiderStamp")
 st.markdown("### Hi Melina ❤️")
 st.write("What movie are you watching today? Let's see if it has spiders? 🎬")
 

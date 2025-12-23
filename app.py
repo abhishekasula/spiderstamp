@@ -9,38 +9,18 @@ def cached_report(title: str, year: str | None):
     movie = resolve_movie(title, year)
     return build_report(movie)
 
-def verdict_block(confidence: str, severity: str, score: int):
-    conf = (confidence or "").lower()
-    sev = (severity or "").lower()
-
-    if sev.startswith("deceased-only"):
-        st.success("🟢 **Likely safe, Melina** ✨")
-        st.caption("Spider is mentioned/seen only as deceased (non-moving, non-threatening).")
-        st.progress(10, text="Spider energy: very low 🫧")
-        return
-
-    if conf == "low":
-        st.success("🟢 **Looks spider-safe, Melina** ✨")
-        st.caption("No strong spider signals found in our checks. (Not a perfect guarantee, but vibes are good.)")
-        st.progress(10, text="Spider energy: low 🫧")
-        st.balloons()
-        return
-
-    if conf == "medium":
-        msg = "🟡 **Proceed with caution, Melina** 👀"
-        if "eye-closeups" in sev:
-            msg += "  (eye-focused imagery flagged)"
-        st.warning(msg)
-        st.caption("Some spider evidence showed up. Might be mild, but stay alert.")
-        st.progress(55, text="Spider energy: medium ⚠️")
-        return
-
-    msg = "🔴 **Spider-heavy likely, Melina** 🚫🕷️"
-    if "eye-closeups" in sev:
-        msg += "  (eye-focused imagery flagged)"
-    st.error(msg)
-    st.caption("Multiple sources suggest spiders. Consider skipping or watching with a safety plan.")
-    st.progress(90, text="Spider energy: high 🚨")
+def cute_presence_banner(present: bool, severity: str):
+    if present:
+        st.error("🕷️ **Spider present:** YES")
+        if severity == "deceased-only":
+            st.info("🪦 It looks like the spider is referenced/shown only as deceased (non-moving).")
+        elif "eye-closeups" in (severity or ""):
+            st.warning("👀 Possible eye-focused spider imagery mentioned in sources.")
+        else:
+            st.info("Spider exists in the movie according to our sources.")
+    else:
+        st.success("✅ **Spider present:** NO")
+        st.caption("No core spider terms found in our sources (best-effort).")
 
 st.title("🕷️ SpiderStamp")
 st.markdown("### Hi Melina 👋")
@@ -58,16 +38,16 @@ if check:
         st.stop()
 
     try:
-        with st.spinner("Checking the web for spider vibes..."):
+        with st.spinner("Checking the web for spider presence..."):
             report = cached_report(movie_title.strip(), year.strip() or None)
 
         movie = report["movie"]
         st.subheader(f"{movie['title']} ({movie['year']})")
-        st.write(f"**🕷️ Spider likelihood:** `{report['confidence']}`  (score={report['score']})")
-        st.write(f"**Severity:** `{report['severity']}`")
-        st.caption(f"IMDb ID: {movie['imdb_id']}")
 
-        verdict_block(report["confidence"], report["severity"], report["score"])
+        cute_presence_banner(report.get("present", False), report.get("severity", ""))
+
+        st.write(f"**Confidence (presence):** `{report['confidence']}`  (score={report['score']})")
+        st.caption(f"IMDb ID: {movie['imdb_id']}")
 
         st.divider()
 
@@ -110,4 +90,4 @@ if check:
     except Exception as e:
         st.error(str(e))
 
-st.caption("🕷️ SpiderStamp is a best-effort detector from public text sources. Visual-only spiders may be missed.")
+st.caption("🕷️ SpiderStamp is a best-effort presence detector from public text sources. Visual-only spiders may be missed.")

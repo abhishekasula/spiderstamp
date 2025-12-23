@@ -38,9 +38,10 @@ DECEASED_CONTEXT_TERMS = [
     "corpse", "body", "carcass", "remains", "lifeless",
     "funeral", "burial", "wake",
     "mourn", "mourns", "mourned",
+    "eulogy", "pays respects",
 ]
 
-# Eye-trigger context (only matters if CORE spider exists; more severe if alive)
+# Eye-trigger context (only matters if CORE spider exists)
 EYE_CONTEXT_TERMS = [
     "eyes",
     "many eyes", "multiple eyes", "dozens of eyes", "rows of eyes",
@@ -48,7 +49,7 @@ EYE_CONTEXT_TERMS = [
     "watching eyes", "staring eyes", "unblinking eyes",
 ]
 
-# Intensity hints (heuristic)
+# Intensity hints (heuristic — only affects "severity" label, not presence)
 SEVERITY_TERMS = {
     "close-up": 3,
     "close up": 3,
@@ -82,7 +83,7 @@ PREFERRED_DOMAINS = {
     "doesthedogdie.com": 3,
 }
 
-USER_AGENT = "Mozilla/5.0 (compatible; SpiderStamp/0.5)"
+USER_AGENT = "Mozilla/5.0 (compatible; SpiderStamp/0.6)"
 
 
 # -----------------------------
@@ -217,7 +218,6 @@ def imdb_parental_guide_evidence(imdb_id: str) -> dict:
     text = clean_text(html)
     core, support = extract_hits(text)
 
-    # No CORE = no spider evidence
     if not core:
         return {
             "source": "imdb_parentalguide",
@@ -239,11 +239,8 @@ def imdb_parental_guide_evidence(imdb_id: str) -> dict:
     eye_ctx = has_eye_context(snip_text)
 
     sev = severity_score(snip_text)
-    # Eye imagery is extra-triggering if spider is alive
     if eye_ctx and not deceased:
         sev += 3
-
-    # If deceased context, drop severity hard (corpse is less threatening)
     if deceased:
         sev = 0
 
@@ -309,7 +306,7 @@ def wikipedia_evidence(movie_title: str, movie_year: str) -> dict:
         deceased = is_deceased_context(snip_text)
         eye_ctx = has_eye_context(snip_text)
 
-        sev = severity_score(snip_text) + 2  # small trust bonus for Wikipedia
+        sev = severity_score(snip_text) + 2
         if eye_ctx and not deceased:
             sev += 3
         if deceased:
@@ -359,7 +356,6 @@ def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int 
         raw_results.extend(duckduckgo_results(q, max_results=6))
         time.sleep(0.2)
 
-    # Deduplicate URLs
     seen = set()
     results = []
     for r in raw_results:
@@ -369,7 +365,6 @@ def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int 
         seen.add(u)
         results.append(r)
 
-    # Rank: prefer reputable domains + core terms in title/snippet; penalize Spider-Man
     def rank(item: dict) -> tuple:
         text = (item.get("title", "") + " " + item.get("snippet", "")).lower()
         core_bonus = 1 if any(t in text for t in CORE_SPIDER_TERMS) else 0
@@ -419,29 +414,37 @@ def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int 
 
 
 # -----------------------------
-# Scoring + report
+# Presence + scoring + report
 # -----------------------------
+def spider_present(imdb_ev: dict, wiki_ev: dict, web_evs: list[dict]) -> bool:
+    """
+    Presence = any CORE spider term found in any source.
+    No scare logic.
+    """
+    if imdb_ev.get("core_hits"):
+        return True
+    if wiki_ev.get("core_hits"):
+        return True
+    return any(e.get("core_hits") for e in web_evs)
+
+
 def score_confidence(imdb_ev: dict, wiki_ev: dict, web_evs: list[dict]) -> tuple[str, int]:
+    """
+    Confidence here means "how confident are we that a spider is present"
+    (NOT how scary it is).
+    """
     score = 0
 
-    # Strong sources
     if imdb_ev.get("ok") and imdb_ev.get("core_hits"):
         score += 7
     if wiki_ev.get("ok") and wiki_ev.get("core_hits"):
         score += 4
 
-    # Independent web confirmations
     score += min(6, len(web_evs))
 
-    # Severity boosts (but severity already zeroed if deceased)
+    # severity helps a little as a proxy for detailed mentions
     sev_total = imdb_ev.get("severity", 0) + wiki_ev.get("severity", 0) + sum(e.get("severity", 0) for e in web_evs)
-    score += min(6, sev_total // 3)
-
-    # If all evidence is deceased-only, downgrade hard
-    all_evs = [imdb_ev, wiki_ev] + web_evs
-    spider_evs = [e for e in all_evs if e.get("core_hits")]
-    if spider_evs and all(e.get("deceased") for e in spider_evs):
-        score -= 7
+    score += min(4, sev_total // 4)
 
     if score >= 12:
         return ("high", score)
@@ -455,31 +458,31 @@ def build_report(movie: dict) -> dict:
     wiki_ev = wikipedia_evidence(movie["title"], movie["year"])
     web_evs = search_and_fetch_evidence(movie["title"], movie["year"], max_pages=12)
 
+    present = spider_present(imdb_ev, wiki_ev, web_evs)
     confidence, score = score_confidence(imdb_ev, wiki_ev, web_evs)
 
-    # Severity label for UX
+    # Optional severity label (for info only)
     all_evs = [imdb_ev, wiki_ev] + web_evs
     spider_evs = [e for e in all_evs if e.get("core_hits")]
-    any_eye = any(e.get("eye_context") and not e.get("deceased") for e in spider_evs)
+    any_eye_alive = any(e.get("eye_context") and not e.get("deceased") for e in spider_evs)
     any_alive = any(e.get("core_hits") and not e.get("deceased") for e in spider_evs)
 
     if spider_evs and not any_alive:
         severity_label = "deceased-only"
-    elif confidence == "high":
-        severity_label = "spider-heavy"
-    elif confidence == "medium":
-        severity_label = "caution"
+    elif present:
+        severity_label = "present"
     else:
-        severity_label = "likely-safe"
+        severity_label = "none"
 
-    if any_eye and severity_label in ("caution", "spider-heavy"):
-        severity_label = severity_label + "+eye-closeups"
+    if any_eye_alive and severity_label in ("present",):
+        severity_label = "present+eye-closeups"
 
     return {
         "movie": movie,
-        "confidence": confidence,
+        "present": present,          # ✅ what you wanted
+        "confidence": confidence,    # confidence of presence
         "score": score,
-        "severity": severity_label,
+        "severity": severity_label,  # informational only
         "evidence": [imdb_ev, wiki_ev],
         "web_evidence": web_evs,
     }

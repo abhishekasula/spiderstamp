@@ -1,18 +1,13 @@
 import os
 import requests
 from dotenv import load_dotenv
-from config import load_key, save_key
 
 load_dotenv()
 
-def get_api_key() -> str:
-    k = os.getenv("OMDB_API_KEY") or load_key()
-    if not k:
-        raise RuntimeError("Missing OMDB_API_KEY. Set it in Streamlit secrets or environment.")
-    return k
-
 def resolve_movie(title: str, year: str | None = None) -> dict:
-    api_key = get_api_key()
+    api_key = os.getenv("OMDB_API_KEY")
+    if not api_key:
+        raise RuntimeError("Missing OMDB_API_KEY. Set it in Streamlit Secrets or a local .env file.")
 
     params = {"apikey": api_key, "t": title, "type": "movie"}
     if year:

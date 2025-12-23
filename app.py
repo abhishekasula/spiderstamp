@@ -3,6 +3,10 @@ from movie_resolve import resolve_movie
 from spider_report import build_report
 
 st.set_page_config(page_title="SpiderStamp (Melina)", page_icon="🕷️")
+@st.cache_data(ttl=86400)
+def cached_report(title: str, year: str | None):
+    movie = resolve_movie(title, year)
+    return build_report(movie)
 
 # --- Cute helper: verdict + messages ---
 def verdict_block(confidence: str, score: int):
@@ -59,8 +63,8 @@ if check:
 
     try:
         with st.spinner("Checking the web for spider vibes..."):
-            movie = resolve_movie(movie_title.strip(), year.strip() or None)
-            report = build_report(movie)
+            report = cached_report(movie_title.strip(), year.strip() or None)
+            movie = report["movie"]
 
         st.subheader(f"{movie['title']} ({movie['year']})")
         st.write(f"**🕷️ Spider likelihood:** `{report['confidence']}`  (score={report['score']})")
@@ -77,18 +81,23 @@ if check:
         st.write(f"- IMDb parental guide available: **{imdb_ev['ok']}**")
         st.write(f"- Spider-ish terms found: **{', '.join(imdb_ev['hits']) if imdb_ev['hits'] else 'None found'}**")
         st.write(f"- Link: {imdb_ev['url']}")
+        st.write(f"**Severity:** `{report['severity']}`")
+
         if imdb_ev["snippet"]:
             st.info(imdb_ev["snippet"])
 
-        st.markdown("### 🌐 Web mentions")
-        if not report["web_mentions"]:
-            st.write("No web snippets returned.")
+        st.markdown("### 🌐 Web evidence (pages we checked)")
+        if not report["web_evidence"]:
+            st.write("No spider hits found on fetched pages.")
         else:
-            for s in report["web_mentions"]:
-                st.markdown(f"**{s['title']}**")
-                st.write(s["snippet"])
-                st.write(s["url"])
+            for e in report["web_evidence"][:8]:
+                st.markdown(f"**{e.get('title','(page)')}**")
+                st.write(f"- URL: {e['url']}")
+                st.write(f"- Terms: {', '.join(e['hits'])}")
+                for sn in e["snippets"]:
+                    st.info(sn)
                 st.divider()
+
 
         st.success("✅ Done! Want to check another movie, Melina?")
 

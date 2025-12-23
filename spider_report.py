@@ -24,6 +24,12 @@ CORE_SPIDER_TERMS = [
     "aragog", "shelob", "ungoliant",
 ]
 
+FORCED_SPIDER_PRESENCE = {
+    # imdb_id is the safest key
+    "tt0417741": True,  # Harry Potter and the Half-Blood Prince (Aragog)
+}
+
+
 # Only count if CORE terms exist (prevents "web" false positives)
 SUPPORT_TERMS = [
     "cobweb", "cobwebs",
@@ -416,16 +422,20 @@ def search_and_fetch_evidence(movie_title: str, movie_year: str, max_pages: int 
 # -----------------------------
 # Presence + scoring + report
 # -----------------------------
-def spider_present(imdb_ev: dict, wiki_ev: dict, web_evs: list[dict]) -> bool:
+def spider_present(imdb_ev: dict, wiki_ev: dict, web_evs: list[dict], imdb_id: str) -> bool:
     """
-    Presence = any CORE spider term found in any source.
-    No scare logic.
+    Presence = any CORE spider term OR forced override.
     """
+    # 🔒 Forced override first
+    if imdb_id in FORCED_SPIDER_PRESENCE:
+        return FORCED_SPIDER_PRESENCE[imdb_id]
+
     if imdb_ev.get("core_hits"):
         return True
     if wiki_ev.get("core_hits"):
         return True
     return any(e.get("core_hits") for e in web_evs)
+
 
 
 def score_confidence(imdb_ev: dict, wiki_ev: dict, web_evs: list[dict]) -> tuple[str, int]:
@@ -458,8 +468,9 @@ def build_report(movie: dict) -> dict:
     wiki_ev = wikipedia_evidence(movie["title"], movie["year"])
     web_evs = search_and_fetch_evidence(movie["title"], movie["year"], max_pages=12)
 
-    present = spider_present(imdb_ev, wiki_ev, web_evs)
-    confidence, score = score_confidence(imdb_ev, wiki_ev, web_evs)
+    present = spider_present(imdb_ev, wiki_ev, web_evs, movie["imdb_id"])
+
+    confidence, score = score_confidence(imdb_ev, wiki_ev, web_evs)s
 
     # Optional severity label (for info only)
     all_evs = [imdb_ev, wiki_ev] + web_evs

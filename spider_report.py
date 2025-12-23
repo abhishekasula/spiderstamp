@@ -6,10 +6,40 @@ from urllib.parse import urlparse
 
 # --- CORE vs SUPPORT TERMS ---
 CORE_SPIDER_TERMS = [
-    "spider", "spiders",
-    "tarantula", "tarantulas",
-    "arachnid", "arachnids",
-    "acromantula", "acromantulas",
+       # generic
+    "spider",
+    "spiders",
+
+    # common spider types
+    "tarantula",
+    "tarantulas",
+    "wolf spider",
+    "jumping spider",
+    "trapdoor spider",
+    "orb weaver",
+    "orb-weaver",
+    "funnel web spider",
+    "funnel-web spider",
+    "black widow",
+    "brown recluse",
+
+    # scientific / biological
+    "arachnid",
+    "arachnids",
+
+    # fantasy / movie-specific (important)
+    "giant spider",
+    "cave spider",
+    "forest spider",
+    "underground spider",
+
+    # franchise-specific spiders
+    "acromantula",
+    "acromantulas",
+    "aragog",
+    "shelob",
+    "ungoliant",
+    "Aragog",
 ]
 
 # Only count if CORE terms exist (prevents “web” false positives)
